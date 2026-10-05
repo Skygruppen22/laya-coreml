@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 
-from .artifacts import package_for_coreml
+from .artifacts import package_for_coreml, verify_files
 from .hub import DEFAULT_MODEL, resolve_checkpoint
 from .prompt import PromptMixin
 from .result import ResultMixin
@@ -44,6 +44,28 @@ class Agent(PromptMixin, ResultMixin):
                 "Re-export with the default enumerated shapes, or use compute_units='cpu'. "
                 "allow_unvalidated_gpu=True is for reproducing the failure only."
             )
+        files = self.manifest.get("files")
+        if not isinstance(files, dict) or not files:
+            raise ValueError("Core ML bundle requires a non-empty file inventory")
+        required = {
+            "rl_agent_config.json",
+            "tokenizer/tokenizer.json",
+            "tokenizer/tokenizer_config.json",
+            "model.mlpackage/Manifest.json",
+            "model.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+            "model.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+        }
+        required.update(
+            str(path.relative_to(self.model_dir))
+            for path in (self.model_dir / "model.mlpackage").rglob("*")
+            if path.is_file()
+        )
+        missing = required - files.keys()
+        if missing:
+            raise ValueError(
+                f"Core ML bundle inventory is missing runtime files: {sorted(missing)}"
+            )
+        verify_files(self.model_dir, files)
         self.cfg = json.loads((self.model_dir / "rl_agent_config.json").read_text())
         self.temperature = self.cfg.get("temperature", [1.0, 1.0, 1.0])
         self.temperature_by_options = self.cfg.get("temperature_by_options", {})
